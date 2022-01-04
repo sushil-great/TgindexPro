@@ -32,13 +32,11 @@ class Views:
         if len(chat_ids) == 1:
             raise web.HTTPFound(f"{chat_ids[0]['alias_id']}")
 
-        chats = []
-        for chat in chat_ids:
-            chats.append({
+        chats = [{
                 'page_id': chat['alias_id'],
                 'name': chat['title'],
                 'url': req.rel_url.path + f"/{chat['alias_id']}"
-            })
+            } for chat in chat_ids]
         return {'chats':chats, 'otg': enable_otg}
 
 
@@ -49,8 +47,7 @@ class Views:
         return_data = {}
         error = req.query.get('e')
         if error:
-            return_data.update({'error': error})
-
+            return_data['error'] = error
         return return_data
 
     @aiohttp_jinja2.template('playlistCreator.html')
@@ -58,7 +55,7 @@ class Views:
         return_data = {}
         error = req.query.get('e')
         if error:
-            return_data.update({'error': error})
+            return_data['error'] = error
         return return_data
 
 
@@ -131,7 +128,7 @@ class Views:
                 'add_offset': 20*offset_val
             }
             if search_query:
-                kwargs.update({'search': search_query})
+                kwargs['search'] = search_query
             messages = (await self.client.get_messages(**kwargs)) or []
 
         except:
@@ -176,7 +173,7 @@ class Views:
         if offset_val:
             query = {'page':offset_val}
             if search_query:
-                query.update({'search':search_query})
+                query['search'] = search_query
             prev_page =  {
                 'url': str(req.rel_url.with_query(query)),
                 'no': offset_val
@@ -185,7 +182,7 @@ class Views:
         if len(messages)==20:
             query = {'page':offset_val+2}
             if search_query:
-                query.update({'search':search_query})
+                query['search'] = search_query
             next_page =  {
                 'url': str(req.rel_url.with_query(query)),
                 'no': offset_val+2
@@ -234,14 +231,17 @@ class Views:
             }
         return_val = {}
         reply_btns = []
-        if message.reply_markup:
-            if isinstance(message.reply_markup, types.ReplyInlineMarkup):
-                for button_row in message.reply_markup.rows:
-                    btns = []
-                    for button in button_row.buttons:
-                        if isinstance(button, types.KeyboardButtonUrl):
-                            btns.append({'url': button.url, 'text': button.text})
-                    reply_btns.append(btns)
+        if message.reply_markup and isinstance(
+            message.reply_markup, types.ReplyInlineMarkup
+        ):
+            for button_row in message.reply_markup.rows:
+                btns = [
+                    {'url': button.url, 'text': button.text}
+                    for button in button_row.buttons
+                    if isinstance(button, types.KeyboardButtonUrl)
+                ]
+
+                reply_btns.append(btns)
         if message.file and not isinstance(message.media, types.MessageMediaWebPage):
             file_name = get_file_name(message)
             file_size = message.file.size
@@ -250,18 +250,13 @@ class Views:
                 'type':message.file.mime_type
             }
             if 'video/' in message.file.mime_type:
-                media.update({
-                    'video' : True
-                })
+                media['video'] = True
             elif 'audio/' in message.file.mime_type:
                 media['audio'] = True
             elif 'image/' in message.file.mime_type:
                 media['image'] = True
 
-            if message.text:
-                caption = message.raw_text
-            else:
-                caption = ''
+            caption = message.raw_text if message.text else ''
             caption_html = Markup.escape(caption).__str__().replace('\n', '<br>')
             return_val = {
                 'found': True,
@@ -311,7 +306,6 @@ class Views:
         else:
             chat = chat[0]
             chat_id = chat['chat_id']
-        chat_name = "Image not available"
         try:
             photo = await self.client.get_profile_photos(chat_id)
         except:
@@ -320,9 +314,10 @@ class Views:
         if not photo:
             W, H = (160, 160)
             c = lambda : random.randint(0, 255)
-            color = tuple([c() for i in range(3)])
+            color = tuple(c() for i in range(3))
             im = Image.new("RGB", (W,H), color)
             draw = ImageDraw.Draw(im)
+            chat_name = "Image not available"
             w, h = draw.textsize(chat_name)
             draw.text(((W-w)/2,(H-h)/2), chat_name, fill="white")
             temp = io.BytesIO()
@@ -330,7 +325,7 @@ class Views:
             body = temp.getvalue()
         else:
             photo = photo[0]
-            pos = -1 if req.query.get('big', None) else int(len(photo.sizes)/2)
+            pos = -1 if req.query.get('big', None) else len(photo.sizes) // 2
             size = self.client._get_thumb(photo.sizes, pos)
             if isinstance(size, (types.PhotoCachedSize, types.PhotoStrippedSize)):
                 body = self.client._download_cached_photo_size(size, bytes)
@@ -343,7 +338,8 @@ class Views:
                 )
                 body = self.client.iter_download(media)
 
-        r = web.Response(
+        #r.enable_chunked_encoding()
+        return web.Response(
             status=200,
             body=body,
             headers={
@@ -351,8 +347,6 @@ class Views:
                 "Content-Disposition": 'inline; filename="logo.jpg"'
             }
         )
-        #r.enable_chunked_encoding()
-        return r
 
 
     async def download_get(self, req):
@@ -398,13 +392,13 @@ class Views:
 
         if not thumbnails:
             c = lambda : random.randint(0, 255)
-            color = tuple([c() for i in range(3)])
+            color = tuple(c() for i in range(3))
             im = Image.new("RGB", (160, 90), color)
             temp = io.BytesIO()
             im.save(temp, "PNG")
             body = temp.getvalue()
         else:
-            thumb_pos = int(len(thumbnails)/2)
+            thumb_pos = len(thumbnails) // 2
             thumbnail = self.client._get_thumb(thumbnails, thumb_pos)
             if not thumbnail or isinstance(thumbnail, types.PhotoSizeEmpty):
                 return web.Response(status=410, text="410: Gone. Access to the target resource is no longer available!")
@@ -421,7 +415,8 @@ class Views:
 
                 body = self.client.iter_download(actual_file)
 
-        r = web.Response(
+        #r.enable_chunked_encoding()
+        return web.Response(
             status=200,
             body=body,
             headers={
@@ -429,8 +424,6 @@ class Views:
                 "Content-Disposition": 'inline; filename="thumbnail.jpg"'
             }
         )
-        #r.enable_chunked_encoding()
-        return r
 
 
     async def handle_request(self, req, head=False):
